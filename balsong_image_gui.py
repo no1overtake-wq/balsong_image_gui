@@ -4,7 +4,7 @@ import re
 import shutil
 import tempfile
 from datetime import datetime
-from tkinter import Tk, Button, filedialog, messagebox
+from tkinter import Tk, Button, filedialog
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -13,6 +13,7 @@ APP_TITLE = "발송 정리"
 
 SPECIAL_TOP_CATEGORY = "누스&리퍼브"
 
+# 표 색상
 HEADER_FILL = "#d9e2f3"
 FOOTER_FILL = "#d9e2f3"
 CATEGORY_FILL = "#fce4d6"
@@ -20,24 +21,31 @@ WHITE_FILL = "#ffffff"
 GRID_COLOR = "#111111"
 TEXT_COLOR = "#111111"
 
+# 프로그램 UI 색상
 WINDOW_BG = "#efefef"
 BUTTON_BG = "#e5e5e5"
 
+# 네가 보낸 이미지 기준 표 크기
+ROW_H = 22
+LEFT_W = 121
+RIGHT_W = 122
+TABLE_W = 244
 
-def load_font(size=15, bold=False):
+FONT_SIZE = 14
+
+
+def load_font(size=14, bold=False):
     """
     Windows 기준 맑은 고딕 사용.
-    GitHub Actions Windows 빌드에서도 정상 동작.
+    exe로 만들었을 때도 Windows에서는 Malgun Gothic으로 표시됨.
     """
-    candidates = []
-
     if bold:
-        candidates += [
+        candidates = [
             r"C:\Windows\Fonts\malgunbd.ttf",
             r"C:\Windows\Fonts\malgun.ttf",
         ]
     else:
-        candidates += [
+        candidates = [
             r"C:\Windows\Fonts\malgun.ttf",
             r"C:\Windows\Fonts\malgunbd.ttf",
         ]
@@ -54,14 +62,9 @@ def load_font(size=15, bold=False):
     return ImageFont.load_default()
 
 
-FONT_HEADER = load_font(15, bold=True)
-FONT_NORMAL = load_font(15, bold=False)
-FONT_BOLD = load_font(15, bold=True)
-
-
-def text_size(draw, text, font):
-    bbox = draw.textbbox((0, 0), str(text), font=font)
-    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+FONT_HEADER = load_font(FONT_SIZE, bold=True)
+FONT_NORMAL = load_font(FONT_SIZE, bold=False)
+FONT_BOLD = load_font(FONT_SIZE, bold=True)
 
 
 def parse_int(value):
@@ -89,12 +92,10 @@ def product_number(product_name):
     n5285 -> 5285
     n083 -> 83
     n86037 -> 86037
-
-    숫자가 없으면 맨 뒤로 보냄.
     """
     text = str(product_name).strip().lower()
-    match = re.search(r"n\s*0*(\d+)", text)
 
+    match = re.search(r"n\s*0*(\d+)", text)
     if match:
         return int(match.group(1))
 
@@ -107,11 +108,10 @@ def product_number(product_name):
 
 def read_csv_flexible(csv_path):
     """
-    한국 쇼핑몰/관리자 CSV는 cp949인 경우가 많아서
-    여러 인코딩을 순서대로 시도.
+    CSV 인코딩 자동 시도.
+    국내 쇼핑몰 CSV는 cp949/euc-kr인 경우가 많음.
     """
     encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
-
     last_error = None
 
     for enc in encodings:
@@ -145,9 +145,6 @@ def read_csv_flexible(csv_path):
 
 
 def find_column(columns, target_name):
-    """
-    공백 차이를 어느 정도 허용해서 컬럼 찾기.
-    """
     normalized_target = target_name.replace(" ", "").strip()
 
     for col in columns:
@@ -169,7 +166,8 @@ def parse_date_label_from_filename(csv_path):
     if match:
         month = int(match.group(2))
         day = int(match.group(3))
-        return f"{month}월 {day}일", f"{match.group(1)}{match.group(2)}{match.group(3)}"
+        date_code = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+        return f"{month}월 {day}일", date_code
 
     now = datetime.now()
     return f"{now.month}월 {now.day}일", now.strftime("%Y%m%d")
@@ -230,16 +228,18 @@ def build_summary(csv_path):
 
     sorted_categories = []
 
+    # 누스&리퍼브는 무조건 맨 위
     if SPECIAL_TOP_CATEGORY in summary:
         sorted_categories.append((SPECIAL_TOP_CATEGORY, summary[SPECIAL_TOP_CATEGORY]))
 
+    # 나머지 분류는 합계 많은 순
     others = [
         (category, data)
         for category, data in summary.items()
         if category != SPECIAL_TOP_CATEGORY
     ]
-
     others.sort(key=lambda item: (-item[1]["total"], item[0]))
+
     sorted_categories.extend(others)
 
     result = []
@@ -249,6 +249,8 @@ def build_summary(csv_path):
         grand_total += data["total"]
 
         products = list(data["products"].items())
+
+        # 상품은 발송수량 많은 순, 같으면 n 뒤 숫자 작은 순
         products.sort(key=lambda item: (-item[1], product_number(item[0]), item[0]))
 
         result.append({
@@ -260,148 +262,221 @@ def build_summary(csv_path):
     return result, grand_total
 
 
-def draw_count(draw, x, y, width, height, quantity, bold_number=False):
+def text_bbox(draw, text, font):
+    return draw.textbbox((0, 0), str(text), font=font)
+
+
+def draw_text_exact_center(draw, box, text, font, fill=TEXT_COLOR):
+    """
+    PIL 글씨 bbox 기준으로 위/아래 여백을 최대한 같게 중앙정렬.
+    """
+    x, y, w, h = box
+    text = str(text)
+
+    bbox = text_bbox(draw, text, font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+
+    tx = x + (w - tw) / 2 - bbox[0]
+    ty = y + (h - th) / 2 - bbox[1]
+
+    draw.text((tx, ty), text, font=font, fill=fill)
+
+
+def draw_text_left_center(draw, box, text, font, padding=6, fill=TEXT_COLOR):
+    """
+    왼쪽 정렬 + 세로 중앙정렬.
+    현재 표에서는 주로 사용하지 않지만 여분으로 둠.
+    """
+    x, y, w, h = box
+    text = str(text)
+
+    bbox = text_bbox(draw, text, font)
+    th = bbox[3] - bbox[1]
+
+    tx = x + padding
+    ty = y + (h - th) / 2 - bbox[1]
+
+    draw.text((tx, ty), text, font=font, fill=fill)
+
+
+def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
+    """
+    오른쪽 수량 칸.
+    숫자는 오른쪽 정렬.
+    숫자와 (건)을 한 줄로 표시.
+    """
     qty_text = str(quantity)
     unit_text = " (건)"
 
     qty_font = FONT_BOLD if bold_number else FONT_NORMAL
     unit_font = FONT_NORMAL
 
-    qty_w, qty_h = text_size(draw, qty_text, qty_font)
-    unit_w, unit_h = text_size(draw, unit_text, unit_font)
+    qty_bbox = text_bbox(draw, qty_text, qty_font)
+    unit_bbox = text_bbox(draw, unit_text, unit_font)
+
+    qty_w = qty_bbox[2] - qty_bbox[0]
+    unit_w = unit_bbox[2] - unit_bbox[0]
 
     total_w = qty_w + unit_w
-    start_x = x + width - total_w - 8
 
-    base_y = y + (height - max(qty_h, unit_h)) // 2 - 1
+    start_x = x + width - total_w - 6
 
-    draw.text((start_x, base_y), qty_text, font=qty_font, fill=TEXT_COLOR)
-    draw.text((start_x + qty_w, base_y), unit_text, font=unit_font, fill=TEXT_COLOR)
+    # 숫자와 단위를 각각 bbox 기준으로 세로 중앙정렬
+    qty_h = qty_bbox[3] - qty_bbox[1]
+    unit_h = unit_bbox[3] - unit_bbox[1]
 
+    qty_y = y + (height - qty_h) / 2 - qty_bbox[1]
+    unit_y = y + (height - unit_h) / 2 - unit_bbox[1]
 
-def draw_center_text(draw, box, text, font):
-    x, y, w, h = box
-    tw, th = text_size(draw, text, font)
+    draw.text((start_x - qty_bbox[0], qty_y), qty_text, font=qty_font, fill=TEXT_COLOR)
     draw.text(
-        (x + (w - tw) // 2, y + (h - th) // 2 - 1),
-        text,
-        font=font,
+        (start_x + qty_w - unit_bbox[0], unit_y),
+        unit_text,
+        font=unit_font,
         fill=TEXT_COLOR
     )
 
 
-def draw_left_text(draw, box, text, font, left_padding=8):
-    x, y, w, h = box
-    tw, th = text_size(draw, text, font)
-    draw.text(
-        (x + left_padding, y + (h - th) // 2 - 1),
-        text,
-        font=font,
-        fill=TEXT_COLOR
-    )
+def fill_row(draw, row_index, left_fill, right_fill=None):
+    if right_fill is None:
+        right_fill = left_fill
 
+    y = row_index * ROW_H
 
-def draw_expand_icon(draw, x, y):
-    size = 10
     draw.rectangle(
-        [x, y, x + size, y + size],
-        fill="#ffffff",
-        outline="#888888",
-        width=1
+        [0, y, LEFT_W - 1, y + ROW_H - 1],
+        fill=left_fill
+    )
+    draw.rectangle(
+        [LEFT_W + 1, y, TABLE_W - 1, y + ROW_H - 1],
+        fill=right_fill
     )
 
-    draw.line(
-        [x + 2, y + size // 2, x + size - 2, y + size // 2],
-        fill="#666666",
-        width=1
-    )
+
+def draw_grid(draw, total_rows):
+    """
+    네가 보낸 이미지처럼 얇은 검정 선.
+    """
+    height = total_rows * ROW_H + 1
+
+    # 세로선
+    draw.line([0, 0, 0, height - 1], fill=GRID_COLOR, width=1)
+    draw.line([LEFT_W, 0, LEFT_W, height - 1], fill=GRID_COLOR, width=1)
+    draw.line([TABLE_W - 1, 0, TABLE_W - 1, height - 1], fill=GRID_COLOR, width=1)
+
+    # 가로선
+    for i in range(total_rows + 1):
+        y = i * ROW_H
+        draw.line([0, y, TABLE_W - 1, y], fill=GRID_COLOR, width=1)
 
 
 def create_summary_image(csv_path):
     summary, grand_total = build_summary(csv_path)
     date_label, date_code = parse_date_label_from_filename(csv_path)
 
-    temp_draw_image = Image.new("RGB", (10, 10), "white")
-    temp_draw = ImageDraw.Draw(temp_draw_image)
+    data_rows = []
 
-    header_h = 28
-    row_h = 25
-
-    rows_for_size = []
+    # header
+    data_rows.append(("header", date_label, "합계 : 발송수량"))
 
     for group in summary:
-        rows_for_size.append(("category", group["category"], group["total"]))
+        data_rows.append(("category", group["category"], group["total"]))
 
         for product, quantity in group["products"]:
-            rows_for_size.append(("product", product, quantity))
+            data_rows.append(("product", product, quantity))
 
-    rows_for_size.append(("footer", "총합계", grand_total))
+    data_rows.append(("footer", "총합계", grand_total))
 
-    left_w = 140
-    right_w = 120
+    total_rows = len(data_rows)
+    height = total_rows * ROW_H + 1
 
-    for row_type, label, quantity in rows_for_size:
-        font = FONT_BOLD if row_type in ("category", "footer") else FONT_NORMAL
-
-        if row_type == "category":
-            tw, _ = text_size(temp_draw, label, font)
-            left_w = max(left_w, tw + 36)
-        else:
-            tw, _ = text_size(temp_draw, label, font)
-            left_w = max(left_w, tw + 28)
-
-        count_text = f"{quantity} (건)"
-        cw, _ = text_size(temp_draw, count_text, FONT_BOLD)
-        right_w = max(right_w, cw + 24)
-
-    title_w, _ = text_size(temp_draw, "합계 : 발송수량", FONT_HEADER)
-    right_w = max(right_w, title_w + 20)
-
-    width = left_w + right_w
-    height = header_h + (len(rows_for_size) * row_h)
-
-    image = Image.new("RGB", (width, height), WHITE_FILL)
+    image = Image.new("RGB", (TABLE_W, height), WHITE_FILL)
     draw = ImageDraw.Draw(image)
 
-    y = 0
+    for row_index, row in enumerate(data_rows):
+        row_type = row[0]
+        y = row_index * ROW_H
 
-    # Header
-    draw.rectangle([0, y, left_w, y + header_h], fill=HEADER_FILL, outline=GRID_COLOR)
-    draw.rectangle([left_w, y, width, y + header_h], fill=HEADER_FILL, outline=GRID_COLOR)
+        if row_type == "header":
+            _, left_text, right_text = row
+            fill_row(draw, row_index, HEADER_FILL)
 
-    draw_center_text(draw, (0, y, left_w, header_h), date_label, FONT_HEADER)
-    draw_center_text(draw, (left_w, y, right_w, header_h), "합계 : 발송수량", FONT_HEADER)
+            draw_text_exact_center(
+                draw,
+                (0, y, LEFT_W, ROW_H),
+                left_text,
+                FONT_HEADER
+            )
+            draw_text_exact_center(
+                draw,
+                (LEFT_W + 1, y, RIGHT_W, ROW_H),
+                right_text,
+                FONT_HEADER
+            )
 
-    y += header_h
+        elif row_type == "category":
+            _, category, quantity = row
+            fill_row(draw, row_index, CATEGORY_FILL)
 
-    for group in summary:
-        # Category row
-        draw.rectangle([0, y, left_w, y + row_h], fill=CATEGORY_FILL, outline=GRID_COLOR)
-        draw.rectangle([left_w, y, width, y + row_h], fill=CATEGORY_FILL, outline=GRID_COLOR)
+            # 누스 / 누스&리퍼브 가운데 정렬
+            draw_text_exact_center(
+                draw,
+                (0, y, LEFT_W, ROW_H),
+                category,
+                FONT_BOLD
+            )
+            draw_count_right(
+                draw,
+                LEFT_W + 1,
+                y,
+                RIGHT_W,
+                ROW_H,
+                quantity,
+                bold_number=True
+            )
 
-        icon_y = y + (row_h - 10) // 2
-        draw_expand_icon(draw, 5, icon_y)
-        draw_left_text(draw, (0, y, left_w, row_h), group["category"], FONT_BOLD, left_padding=22)
-        draw_count(draw, left_w, y, right_w, row_h, group["total"], bold_number=True)
+        elif row_type == "product":
+            _, product, quantity = row
+            fill_row(draw, row_index, WHITE_FILL)
 
-        y += row_h
+            draw_text_exact_center(
+                draw,
+                (0, y, LEFT_W, ROW_H),
+                product,
+                FONT_NORMAL
+            )
+            draw_count_right(
+                draw,
+                LEFT_W + 1,
+                y,
+                RIGHT_W,
+                ROW_H,
+                quantity,
+                bold_number=False
+            )
 
-        # Product rows
-        for product, quantity in group["products"]:
-            draw.rectangle([0, y, left_w, y + row_h], fill=WHITE_FILL, outline=GRID_COLOR)
-            draw.rectangle([left_w, y, width, y + row_h], fill=WHITE_FILL, outline=GRID_COLOR)
+        elif row_type == "footer":
+            _, label, quantity = row
+            fill_row(draw, row_index, FOOTER_FILL)
 
-            draw_center_text(draw, (0, y, left_w, row_h), product, FONT_NORMAL)
-            draw_count(draw, left_w, y, right_w, row_h, quantity, bold_number=False)
+            draw_text_exact_center(
+                draw,
+                (0, y, LEFT_W, ROW_H),
+                label,
+                FONT_BOLD
+            )
+            draw_count_right(
+                draw,
+                LEFT_W + 1,
+                y,
+                RIGHT_W,
+                ROW_H,
+                quantity,
+                bold_number=True
+            )
 
-            y += row_h
-
-    # Footer row
-    draw.rectangle([0, y, left_w, y + row_h], fill=FOOTER_FILL, outline=GRID_COLOR)
-    draw.rectangle([left_w, y, width, y + row_h], fill=FOOTER_FILL, outline=GRID_COLOR)
-
-    draw_center_text(draw, (0, y, left_w, row_h), "총합계", FONT_BOLD)
-    draw_count(draw, left_w, y, right_w, row_h, grand_total, bold_number=True)
+    draw_grid(draw, total_rows)
 
     output_name = f"발송정리_{date_code}.png"
     temp_path = os.path.join(tempfile.gettempdir(), output_name)
@@ -419,6 +494,7 @@ def unique_file_path(folder, filename):
         return path
 
     index = 1
+
     while True:
         new_name = f"{base}_{index}{ext}"
         new_path = os.path.join(folder, new_name)
@@ -436,6 +512,9 @@ class BalsongApp:
         self.root.geometry("360x220")
         self.root.resizable(False, False)
         self.root.configure(bg=WINDOW_BG)
+
+        # Tk 기본 폰트도 맑은 고딕 계열로 지정
+        self.root.option_add("*Font", "Malgun Gothic 14")
 
         self.ready_to_download = False
         self.generated_image_path = None
@@ -473,25 +552,26 @@ class BalsongApp:
             return
 
         try:
+            self.button.config(text="정리 중...")
+            self.root.update_idletasks()
+
             image_path, filename = create_summary_image(csv_path)
 
             self.generated_image_path = image_path
             self.generated_filename = filename
             self.ready_to_download = True
 
+            # 팝업 없이 버튼 이름만 다운로드로 변경
             self.button.config(text="다운로드")
-            messagebox.showinfo(
-                "완료",
-                "이미지 파일 생성이 완료되었습니다.\n\n다운로드 버튼을 눌러 저장할 폴더를 선택하세요."
-            )
 
-        except Exception as e:
-            messagebox.showerror("오류", str(e))
+        except Exception:
+            # 팝업 없이 버튼에만 오류 표시 후 원래대로 복구
             self.reset_state()
+            self.button.config(text="오류\n다시 시도")
+            self.root.after(1800, self.reset_state)
 
     def download_image(self):
         if not self.generated_image_path or not os.path.exists(self.generated_image_path):
-            messagebox.showerror("오류", "다운로드할 이미지 파일이 없습니다.")
             self.reset_state()
             return
 
@@ -504,15 +584,13 @@ class BalsongApp:
             save_path = unique_file_path(folder, self.generated_filename)
             shutil.copy2(self.generated_image_path, save_path)
 
-            messagebox.showinfo(
-                "저장 완료",
-                f"이미지 파일을 저장했습니다.\n\n{save_path}"
-            )
-
+            # 저장 후 팝업 없이 바로 초기 상태로 복귀
             self.reset_state()
 
-        except Exception as e:
-            messagebox.showerror("오류", str(e))
+        except Exception:
+            self.reset_state()
+            self.button.config(text="저장 오류")
+            self.root.after(1800, self.reset_state)
 
     def reset_state(self):
         self.ready_to_download = False
