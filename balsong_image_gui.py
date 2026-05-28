@@ -4,17 +4,17 @@ import re
 import shutil
 import tempfile
 from datetime import datetime
-from tkinter import Tk, Button, filedialog
+from tkinter import Tk, Button, Entry, Label, filedialog, messagebox, StringVar
 import tkinter.font as tkfont
 
 from PIL import Image, ImageDraw, ImageFont
 
 
-APP_TITLE = "발송 정리"
+APP_TITLE = "통계 정리"
 
 SPECIAL_TOP_CATEGORY = "누스&리퍼브"
 
-# 표 색상
+# 결과 이미지 색상
 # 나중에 RGB 값을 알게 되면 이 부분만 바꾸면 됩니다.
 HEADER_FILL = "#d9e2f3"
 FOOTER_FILL = "#d9e2f3"
@@ -24,17 +24,22 @@ GRID_COLOR = "#111111"
 TEXT_COLOR = "#111111"
 
 # 프로그램 UI 색상
-WINDOW_BG = "#efefef"
+WINDOW_BG = "#ffffff"
 BUTTON_BG = "#e5e5e5"
 BUTTON_ACTIVE_BG = "#d6d6d6"
+ENTRY_BG = "#ffffff"
+BORDER_COLOR = "#cccccc"
 
-# 표 크기
-# 사용자가 보낸 이미지와 비슷하게 고정값으로 맞춤
+# 발송 통계 이미지 표 크기
 ROW_H = 22
 LEFT_W = 121
 RIGHT_W = 122
-TABLE_W = LEFT_W + 1 + RIGHT_W  # 가운데 세로선 1px 포함: 244px
+TABLE_W = LEFT_W + 1 + RIGHT_W
 FONT_SIZE = 14
+
+# 프로그램 창 크기
+WINDOW_W = 640
+WINDOW_H = 270
 
 
 def load_font(size=14, bold=False):
@@ -164,22 +169,27 @@ def find_column(columns, target_name):
     return None
 
 
-def parse_date_label_from_filename(csv_path):
+def parse_date_info_from_filename(file_path):
     """
-    파일명에 20260527 같은 날짜가 있으면 '5월 27일'로 표시합니다.
+    파일명에 20260528 같은 날짜가 있으면:
+    - 이미지 상단 표시: 5월 28일
+    - 저장 파일명 코드: 260528
+
     날짜가 없으면 오늘 날짜를 사용합니다.
     """
-    name = os.path.basename(csv_path)
+    name = os.path.basename(file_path)
     match = re.search(r"(20\d{2})(\d{2})(\d{2})", name)
 
     if match:
+        year_full = int(match.group(1))
         month = int(match.group(2))
         day = int(match.group(3))
-        date_code = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-        return f"{month}월 {day}일", date_code
+        date_label = f"{month}월 {day}일"
+        date_code = f"{str(year_full)[2:]}{month:02d}{day:02d}"
+        return date_label, date_code
 
     now = datetime.now()
-    return f"{now.month}월 {now.day}일", now.strftime("%Y%m%d")
+    return f"{now.month}월 {now.day}일", now.strftime("%y%m%d")
 
 
 def build_summary(csv_path):
@@ -278,7 +288,6 @@ def text_bbox(draw, text, font):
 def draw_text_exact_center(draw, box, text, font, fill=TEXT_COLOR):
     """
     PIL의 textbbox 기준으로 가로/세로 중앙정렬.
-    위쪽 여백이 더 커 보이는 문제를 줄이기 위해 bbox offset까지 반영합니다.
     """
     x, y, w, h = box
     text = str(text)
@@ -335,14 +344,11 @@ def fill_row(draw, row_index, fill):
     """
     y = row_index * ROW_H
 
-    # 왼쪽 영역: x 0~120
     draw.rectangle(
         [0, y, LEFT_W - 1, y + ROW_H - 1],
         fill=fill
     )
 
-    # 가운데 세로선은 x=121
-    # 오른쪽 영역: x 122~243
     draw.rectangle(
         [LEFT_W + 1, y, TABLE_W - 1, y + ROW_H - 1],
         fill=fill
@@ -366,9 +372,13 @@ def draw_grid(draw, total_rows):
         draw.line([0, y, TABLE_W - 1, y], fill=GRID_COLOR, width=1)
 
 
-def create_summary_image(csv_path):
+def create_balsong_summary_image(csv_path):
+    """
+    발송 CSV를 분석해서 임시 PNG 파일을 만들고,
+    저장 파일명은 YYMMDD-발송통계.png 형태로 반환합니다.
+    """
     summary, grand_total = build_summary(csv_path)
-    date_label, date_code = parse_date_label_from_filename(csv_path)
+    date_label, date_code = parse_date_info_from_filename(csv_path)
 
     data_rows = []
 
@@ -416,7 +426,6 @@ def create_summary_image(csv_path):
             _, category, quantity = row
             fill_row(draw, row_index, CATEGORY_FILL)
 
-            # 누스 / 누스&리퍼브 가운데 정렬
             draw_text_exact_center(
                 draw,
                 (0, y, LEFT_W, ROW_H),
@@ -475,7 +484,7 @@ def create_summary_image(csv_path):
 
     draw_grid(draw, total_rows)
 
-    output_name = f"발송정리_{date_code}.png"
+    output_name = f"{date_code}-발송통계.png"
     temp_path = os.path.join(tempfile.gettempdir(), output_name)
 
     image.save(temp_path, "PNG")
@@ -484,6 +493,10 @@ def create_summary_image(csv_path):
 
 
 def unique_file_path(folder, filename):
+    """
+    같은 이름이 이미 있으면 파일명 뒤에 (1), (2)를 붙입니다.
+    예: 260528-발송통계.png -> 260528-발송통계 (1).png
+    """
     base, ext = os.path.splitext(filename)
     path = os.path.join(folder, filename)
 
@@ -493,7 +506,7 @@ def unique_file_path(folder, filename):
     index = 1
 
     while True:
-        new_name = f"{base}_{index}{ext}"
+        new_name = f"{base} ({index}){ext}"
         new_path = os.path.join(folder, new_name)
 
         if not os.path.exists(new_path):
@@ -502,45 +515,182 @@ def unique_file_path(folder, filename):
         index += 1
 
 
-class BalsongApp:
+def get_unsent_output_names(excel_path):
+    """
+    미발송 통계 저장 파일명 규칙.
+    실제 이미지 생성 로직은 추후 추가 예정입니다.
+    """
+    _, date_code = parse_date_info_from_filename(excel_path)
+    return (
+        f"{date_code}-미발송통계 (1).png",
+        f"{date_code}-미발송통계 (2).png",
+    )
+
+
+def decrypt_excel_to_temp_if_needed(excel_path, password):
+    """
+    추후 미발송 엑셀 분석에 사용할 암호 해제용 준비 함수입니다.
+
+    현재는 미발송 분석 로직을 아직 연결하지 않았지만,
+    암호가 있는 Excel 파일을 열어야 할 때 아래 흐름으로 사용할 수 있습니다.
+
+    사용하려면 requirements.txt에 아래 패키지를 추가해야 합니다.
+    msoffcrypto-tool>=5.4.0
+
+    반환값:
+    - 암호가 없거나 복호화가 필요 없으면 원본 경로
+    - 암호를 입력했고 복호화에 성공하면 임시 xlsx/xls 경로
+    """
+    if not password:
+        return excel_path
+
+    try:
+        import msoffcrypto
+    except Exception:
+        # 아직 미발송 분석 기능을 연결하기 전이라 빌드 실패를 막기 위해 원본 경로를 반환합니다.
+        return excel_path
+
+    temp_ext = os.path.splitext(excel_path)[1] or ".xlsx"
+    temp_path = os.path.join(tempfile.gettempdir(), f"decrypted_excel_{datetime.now().strftime('%Y%m%d_%H%M%S')}{temp_ext}")
+
+    with open(excel_path, "rb") as src:
+        office_file = msoffcrypto.OfficeFile(src)
+        office_file.load_key(password=password)
+
+        with open(temp_path, "wb") as dst:
+            office_file.decrypt(dst)
+
+    return temp_path
+
+
+class StatisticsApp:
     def __init__(self):
         self.root = Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("360x220")
         self.root.resizable(False, False)
         self.root.configure(bg=WINDOW_BG)
 
         # Tkinter UI 폰트.
-        # 튜플 방식 대신 tkfont.Font를 사용해 'Malgun Gothic' 띄어쓰기 오류 방지.
-        self.ui_font = tkfont.Font(family="Malgun Gothic", size=14)
-        self.button_font = tkfont.Font(family="Malgun Gothic", size=24, weight="bold")
+        # tkfont.Font를 사용해 'Malgun Gothic' 띄어쓰기 오류를 방지합니다.
+        self.ui_font = tkfont.Font(family="Malgun Gothic", size=11)
+        self.small_font = tkfont.Font(family="Malgun Gothic", size=10)
+        self.button_font = tkfont.Font(family="Malgun Gothic", size=22, weight="bold")
 
-        self.ready_to_download = False
-        self.generated_image_path = None
-        self.generated_filename = None
+        self.save_folder_var = StringVar(value="")
+        self.excel_password_var = StringVar(value="")
 
-        self.button = Button(
+        self.build_ui()
+        self.center_window(WINDOW_W, WINDOW_H)
+
+    def center_window(self, width, height):
+        self.root.update_idletasks()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        x = int((screen_w - width) / 2)
+        y = int((screen_h - height) / 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def build_ui(self):
+        self.balsong_button = Button(
             self.root,
-            text="발송 정리",
+            text="발송 통계",
             font=self.button_font,
             bg=BUTTON_BG,
             activebackground=BUTTON_ACTIVE_BG,
             relief="solid",
             bd=1,
-            command=self.on_button_click
+            command=self.run_balsong_statistics
         )
+        self.balsong_button.place(x=40, y=35, width=260, height=95)
 
-        self.button.place(x=40, y=45, width=280, height=120)
+        self.unsent_button = Button(
+            self.root,
+            text="미발송 통계",
+            font=self.button_font,
+            bg=BUTTON_BG,
+            activebackground=BUTTON_ACTIVE_BG,
+            relief="solid",
+            bd=1,
+            command=self.run_unsent_statistics_placeholder
+        )
+        self.unsent_button.place(x=340, y=35, width=260, height=95)
 
-    def on_button_click(self):
-        if self.ready_to_download:
-            self.download_image()
-        else:
-            self.analyze_csv()
+        self.folder_button = Button(
+            self.root,
+            text="저장 폴더 선택",
+            font=self.ui_font,
+            bg=BUTTON_BG,
+            activebackground=BUTTON_ACTIVE_BG,
+            relief="solid",
+            bd=1,
+            command=self.choose_save_folder
+        )
+        self.folder_button.place(x=40, y=155, width=130, height=34)
 
-    def analyze_csv(self):
+        self.folder_entry = Entry(
+            self.root,
+            textvariable=self.save_folder_var,
+            font=self.small_font,
+            bg=ENTRY_BG,
+            relief="solid",
+            bd=1,
+            state="readonly",
+            readonlybackground=ENTRY_BG
+        )
+        self.folder_entry.place(x=180, y=155, width=280, height=34)
+
+        self.password_label = Label(
+            self.root,
+            text="엑셀 암호",
+            font=self.ui_font,
+            bg=WINDOW_BG,
+            anchor="w"
+        )
+        self.password_label.place(x=475, y=137, width=120, height=22)
+
+        self.password_entry = Entry(
+            self.root,
+            textvariable=self.excel_password_var,
+            font=self.ui_font,
+            bg=ENTRY_BG,
+            relief="solid",
+            bd=1,
+            show="*"
+        )
+        self.password_entry.place(x=475, y=155, width=125, height=34)
+
+    def choose_save_folder(self):
+        folder = filedialog.askdirectory(title="저장할 폴더 선택")
+        if not folder:
+            return
+
+        self.save_folder_var.set(folder)
+
+    def get_save_folder_or_warn(self):
+        folder = self.save_folder_var.get().strip()
+
+        if not folder:
+            messagebox.showwarning("저장 폴더 선택", "먼저 저장 폴더를 선택해 주세요.")
+            return None
+
+        if not os.path.isdir(folder):
+            messagebox.showwarning("저장 폴더 확인", "선택한 저장 폴더를 찾을 수 없습니다.\n다시 선택해 주세요.")
+            self.save_folder_var.set("")
+            return None
+
+        return folder
+
+    def flash_button_text(self, button, text, reset_text, delay=1400):
+        button.config(text=text)
+        self.root.after(delay, lambda: button.config(text=reset_text))
+
+    def run_balsong_statistics(self):
+        save_folder = self.get_save_folder_or_warn()
+        if not save_folder:
+            return
+
         csv_path = filedialog.askopenfilename(
-            title="CSV 파일 선택",
+            title="발송 CSV 파일 선택",
             filetypes=[
                 ("CSV 파일", "*.csv"),
                 ("모든 파일", "*.*")
@@ -551,56 +701,63 @@ class BalsongApp:
             return
 
         try:
-            self.button.config(text="정리 중...")
+            self.balsong_button.config(text="정리 중...")
             self.root.update_idletasks()
 
-            image_path, filename = create_summary_image(csv_path)
+            temp_image_path, output_name = create_balsong_summary_image(csv_path)
+            save_path = unique_file_path(save_folder, output_name)
+            shutil.copy2(temp_image_path, save_path)
 
-            self.generated_image_path = image_path
-            self.generated_filename = filename
-            self.ready_to_download = True
-
-            # 팝업 없이 버튼 이름만 변경
-            self.button.config(text="다운로드")
+            self.flash_button_text(self.balsong_button, "저장 완료", "발송 통계")
 
         except Exception:
-            # 팝업 없이 버튼에만 오류 표시 후 복구
-            self.reset_state()
-            self.button.config(text="오류\n다시 시도")
-            self.root.after(1800, self.reset_state)
+            self.flash_button_text(self.balsong_button, "오류", "발송 통계", delay=1600)
 
-    def download_image(self):
-        if not self.generated_image_path or not os.path.exists(self.generated_image_path):
-            self.reset_state()
+    def run_unsent_statistics_placeholder(self):
+        """
+        미발송 통계는 UI와 파일명 규칙, 암호 입력 연결 자리만 먼저 만든 상태입니다.
+        실제 엑셀 분석 후 이미지 2장 생성 로직은 추후 추가합니다.
+        """
+        save_folder = self.get_save_folder_or_warn()
+        if not save_folder:
             return
 
-        folder = filedialog.askdirectory(title="이미지를 저장할 폴더 선택")
+        excel_path = filedialog.askopenfilename(
+            title="미발송 엑셀 파일 선택",
+            filetypes=[
+                ("Excel 파일", "*.xls *.xlsx"),
+                ("모든 파일", "*.*")
+            ]
+        )
 
-        if not folder:
+        if not excel_path:
             return
 
         try:
-            save_path = unique_file_path(folder, self.generated_filename)
-            shutil.copy2(self.generated_image_path, save_path)
+            self.unsent_button.config(text="준비 중...")
+            self.root.update_idletasks()
 
-            # 저장 후 팝업 없이 초기 상태로 복귀
-            self.reset_state()
+            password = self.excel_password_var.get()
+
+            # 추후 실제 분석 함수에서 이 경로를 사용하면 됩니다.
+            # 암호가 있고 msoffcrypto-tool이 설치되어 있으면 임시 복호화 파일 경로를 반환합니다.
+            prepared_excel_path = decrypt_excel_to_temp_if_needed(excel_path, password)
+            _ = prepared_excel_path
+
+            # 추후 생성할 파일명 규칙입니다.
+            output_name_1, output_name_2 = get_unsent_output_names(excel_path)
+            _ = os.path.join(save_folder, output_name_1)
+            _ = os.path.join(save_folder, output_name_2)
+
+            self.flash_button_text(self.unsent_button, "기능 준비중", "미발송 통계", delay=1600)
 
         except Exception:
-            self.reset_state()
-            self.button.config(text="저장 오류")
-            self.root.after(1800, self.reset_state)
-
-    def reset_state(self):
-        self.ready_to_download = False
-        self.generated_image_path = None
-        self.generated_filename = None
-        self.button.config(text="발송 정리")
+            self.flash_button_text(self.unsent_button, "오류", "미발송 통계", delay=1600)
 
     def run(self):
         self.root.mainloop()
 
 
 if __name__ == "__main__":
-    app = BalsongApp()
+    app = StatisticsApp()
     app.run()
