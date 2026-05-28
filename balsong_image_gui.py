@@ -5,6 +5,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from tkinter import Tk, Button, filedialog
+import tkinter.font as tkfont
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,6 +15,7 @@ APP_TITLE = "발송 정리"
 SPECIAL_TOP_CATEGORY = "누스&리퍼브"
 
 # 표 색상
+# 나중에 RGB 값을 알게 되면 이 부분만 바꾸면 됩니다.
 HEADER_FILL = "#d9e2f3"
 FOOTER_FILL = "#d9e2f3"
 CATEGORY_FILL = "#fce4d6"
@@ -24,20 +26,21 @@ TEXT_COLOR = "#111111"
 # 프로그램 UI 색상
 WINDOW_BG = "#efefef"
 BUTTON_BG = "#e5e5e5"
+BUTTON_ACTIVE_BG = "#d6d6d6"
 
-# 네가 보낸 이미지 기준 표 크기
+# 표 크기
+# 사용자가 보낸 이미지와 비슷하게 고정값으로 맞춤
 ROW_H = 22
 LEFT_W = 121
 RIGHT_W = 122
-TABLE_W = 244
-
+TABLE_W = LEFT_W + 1 + RIGHT_W  # 가운데 세로선 1px 포함: 244px
 FONT_SIZE = 14
 
 
 def load_font(size=14, bold=False):
     """
-    Windows 기준 맑은 고딕 사용.
-    exe로 만들었을 때도 Windows에서는 Malgun Gothic으로 표시됨.
+    결과 이미지에 사용할 폰트.
+    Windows에서는 맑은 고딕을 우선 사용합니다.
     """
     if bold:
         candidates = [
@@ -89,9 +92,11 @@ def parse_int(value):
 
 def product_number(product_name):
     """
-    n5285 -> 5285
-    n083 -> 83
+    n5285  -> 5285
+    n083   -> 83
     n86037 -> 86037
+
+    숫자가 없으면 뒤로 보냅니다.
     """
     text = str(product_name).strip().lower()
 
@@ -109,7 +114,7 @@ def product_number(product_name):
 def read_csv_flexible(csv_path):
     """
     CSV 인코딩 자동 시도.
-    국내 쇼핑몰 CSV는 cp949/euc-kr인 경우가 많음.
+    국내 쇼핑몰/관리자 CSV는 cp949, euc-kr인 경우가 많아서 같이 시도합니다.
     """
     encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
     last_error = None
@@ -145,6 +150,10 @@ def read_csv_flexible(csv_path):
 
 
 def find_column(columns, target_name):
+    """
+    공백 차이는 무시하고 컬럼명을 찾습니다.
+    예: '상품 분류명'도 '상품분류명'처럼 인식 가능.
+    """
     normalized_target = target_name.replace(" ", "").strip()
 
     for col in columns:
@@ -157,8 +166,8 @@ def find_column(columns, target_name):
 
 def parse_date_label_from_filename(csv_path):
     """
-    파일명에 20260527 같은 날짜가 있으면 '5월 27일'로 표시.
-    없으면 오늘 날짜 사용.
+    파일명에 20260527 같은 날짜가 있으면 '5월 27일'로 표시합니다.
+    날짜가 없으면 오늘 날짜를 사용합니다.
     """
     name = os.path.basename(csv_path)
     match = re.search(r"(20\d{2})(\d{2})(\d{2})", name)
@@ -228,18 +237,17 @@ def build_summary(csv_path):
 
     sorted_categories = []
 
-    # 누스&리퍼브는 무조건 맨 위
+    # 누스&리퍼브는 수량과 관계없이 맨 위 고정
     if SPECIAL_TOP_CATEGORY in summary:
         sorted_categories.append((SPECIAL_TOP_CATEGORY, summary[SPECIAL_TOP_CATEGORY]))
 
-    # 나머지 분류는 합계 많은 순
+    # 나머지 상품분류는 발송수량 합계 많은 순
     others = [
         (category, data)
         for category, data in summary.items()
         if category != SPECIAL_TOP_CATEGORY
     ]
     others.sort(key=lambda item: (-item[1]["total"], item[0]))
-
     sorted_categories.extend(others)
 
     result = []
@@ -250,7 +258,8 @@ def build_summary(csv_path):
 
         products = list(data["products"].items())
 
-        # 상품은 발송수량 많은 순, 같으면 n 뒤 숫자 작은 순
+        # 상품명은 발송수량 많은 순,
+        # 수량이 같으면 n 뒤 숫자 작은 순
         products.sort(key=lambda item: (-item[1], product_number(item[0]), item[0]))
 
         result.append({
@@ -268,7 +277,8 @@ def text_bbox(draw, text, font):
 
 def draw_text_exact_center(draw, box, text, font, fill=TEXT_COLOR):
     """
-    PIL 글씨 bbox 기준으로 위/아래 여백을 최대한 같게 중앙정렬.
+    PIL의 textbbox 기준으로 가로/세로 중앙정렬.
+    위쪽 여백이 더 커 보이는 문제를 줄이기 위해 bbox offset까지 반영합니다.
     """
     x, y, w, h = box
     text = str(text)
@@ -283,28 +293,10 @@ def draw_text_exact_center(draw, box, text, font, fill=TEXT_COLOR):
     draw.text((tx, ty), text, font=font, fill=fill)
 
 
-def draw_text_left_center(draw, box, text, font, padding=6, fill=TEXT_COLOR):
-    """
-    왼쪽 정렬 + 세로 중앙정렬.
-    현재 표에서는 주로 사용하지 않지만 여분으로 둠.
-    """
-    x, y, w, h = box
-    text = str(text)
-
-    bbox = text_bbox(draw, text, font)
-    th = bbox[3] - bbox[1]
-
-    tx = x + padding
-    ty = y + (h - th) / 2 - bbox[1]
-
-    draw.text((tx, ty), text, font=font, fill=fill)
-
-
 def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
     """
     오른쪽 수량 칸.
-    숫자는 오른쪽 정렬.
-    숫자와 (건)을 한 줄로 표시.
+    숫자 + ' (건)'을 오른쪽 정렬로 표시합니다.
     """
     qty_text = str(quantity)
     unit_text = " (건)"
@@ -317,12 +309,10 @@ def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
 
     qty_w = qty_bbox[2] - qty_bbox[0]
     unit_w = unit_bbox[2] - unit_bbox[0]
-
     total_w = qty_w + unit_w
 
     start_x = x + width - total_w - 6
 
-    # 숫자와 단위를 각각 bbox 기준으로 세로 중앙정렬
     qty_h = qty_bbox[3] - qty_bbox[1]
     unit_h = unit_bbox[3] - unit_bbox[1]
 
@@ -338,25 +328,30 @@ def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
     )
 
 
-def fill_row(draw, row_index, left_fill, right_fill=None):
-    if right_fill is None:
-        right_fill = left_fill
-
+def fill_row(draw, row_index, fill):
+    """
+    행 배경만 채웁니다.
+    선은 마지막에 draw_grid에서 한 번에 그립니다.
+    """
     y = row_index * ROW_H
 
+    # 왼쪽 영역: x 0~120
     draw.rectangle(
         [0, y, LEFT_W - 1, y + ROW_H - 1],
-        fill=left_fill
+        fill=fill
     )
+
+    # 가운데 세로선은 x=121
+    # 오른쪽 영역: x 122~243
     draw.rectangle(
         [LEFT_W + 1, y, TABLE_W - 1, y + ROW_H - 1],
-        fill=right_fill
+        fill=fill
     )
 
 
 def draw_grid(draw, total_rows):
     """
-    네가 보낸 이미지처럼 얇은 검정 선.
+    표 테두리와 칸 선을 1px로 그립니다.
     """
     height = total_rows * ROW_H + 1
 
@@ -377,15 +372,17 @@ def create_summary_image(csv_path):
 
     data_rows = []
 
-    # header
+    # 상단 제목 행
     data_rows.append(("header", date_label, "합계 : 발송수량"))
 
+    # 상품분류 + 상품 행
     for group in summary:
         data_rows.append(("category", group["category"], group["total"]))
 
         for product, quantity in group["products"]:
             data_rows.append(("product", product, quantity))
 
+    # 총합계 행
     data_rows.append(("footer", "총합계", grand_total))
 
     total_rows = len(data_rows)
@@ -513,8 +510,10 @@ class BalsongApp:
         self.root.resizable(False, False)
         self.root.configure(bg=WINDOW_BG)
 
-        # Tk 기본 폰트도 맑은 고딕 계열로 지정
-        self.root.option_add("*Font", "Malgun Gothic 14")
+        # Tkinter UI 폰트.
+        # 튜플 방식 대신 tkfont.Font를 사용해 'Malgun Gothic' 띄어쓰기 오류 방지.
+        self.ui_font = tkfont.Font(family="Malgun Gothic", size=14)
+        self.button_font = tkfont.Font(family="Malgun Gothic", size=24, weight="bold")
 
         self.ready_to_download = False
         self.generated_image_path = None
@@ -523,9 +522,9 @@ class BalsongApp:
         self.button = Button(
             self.root,
             text="발송 정리",
-            font=("Malgun Gothic", 24, "bold"),
+            font=self.button_font,
             bg=BUTTON_BG,
-            activebackground="#d6d6d6",
+            activebackground=BUTTON_ACTIVE_BG,
             relief="solid",
             bd=1,
             command=self.on_button_click
@@ -561,11 +560,11 @@ class BalsongApp:
             self.generated_filename = filename
             self.ready_to_download = True
 
-            # 팝업 없이 버튼 이름만 다운로드로 변경
+            # 팝업 없이 버튼 이름만 변경
             self.button.config(text="다운로드")
 
         except Exception:
-            # 팝업 없이 버튼에만 오류 표시 후 원래대로 복구
+            # 팝업 없이 버튼에만 오류 표시 후 복구
             self.reset_state()
             self.button.config(text="오류\n다시 시도")
             self.root.after(1800, self.reset_state)
@@ -584,7 +583,7 @@ class BalsongApp:
             save_path = unique_file_path(folder, self.generated_filename)
             shutil.copy2(self.generated_image_path, save_path)
 
-            # 저장 후 팝업 없이 바로 초기 상태로 복귀
+            # 저장 후 팝업 없이 초기 상태로 복귀
             self.reset_state()
 
         except Exception:
