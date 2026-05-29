@@ -38,8 +38,9 @@ TABLE_W = LEFT_W + 1 + RIGHT_W
 FONT_SIZE = 14
 
 # 프로그램 창 크기
+# 아래쪽 여백이 과하게 남지 않도록 높이를 줄였습니다.
 WINDOW_W = 640
-WINDOW_H = 270
+WINDOW_H = 210
 
 
 def load_font(size=14, bold=False):
@@ -70,9 +71,41 @@ def load_font(size=14, bold=False):
     return ImageFont.load_default()
 
 
+def load_number_font(size=14, bold=False):
+    """
+    결과 이미지의 수량 숫자에 사용할 폰트.
+    숫자 가독성을 비교하기 위해 Arial을 우선 사용합니다.
+    """
+    if bold:
+        candidates = [
+            r"C:\Windows\Fonts\arialbd.ttf",
+            r"C:\Windows\Fonts\arial.ttf",
+        ]
+    else:
+        candidates = [
+            r"C:\Windows\Fonts\arial.ttf",
+            r"C:\Windows\Fonts\arialbd.ttf",
+        ]
+
+    candidates += [
+        r"C:\Windows\Fonts\malgun.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+
+    return ImageFont.load_default()
+
+
 FONT_HEADER = load_font(FONT_SIZE, bold=True)
 FONT_NORMAL = load_font(FONT_SIZE, bold=False)
 FONT_BOLD = load_font(FONT_SIZE, bold=True)
+
+# 수량 숫자 전용 폰트: Arial
+FONT_NUMBER = load_number_font(FONT_SIZE, bold=False)
+FONT_NUMBER_BOLD = load_number_font(FONT_SIZE, bold=True)
 
 
 def parse_int(value):
@@ -296,8 +329,8 @@ def draw_text_exact_center(draw, box, text, font, fill=TEXT_COLOR):
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
 
-    tx = x + (w - tw) / 2 - bbox[0]
-    ty = y + (h - th) / 2 - bbox[1]
+    tx = round(x + (w - tw) / 2 - bbox[0])
+    ty = round(y + (h - th) / 2 - bbox[1])
 
     draw.text((tx, ty), text, font=font, fill=fill)
 
@@ -310,7 +343,8 @@ def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
     qty_text = str(quantity)
     unit_text = " (건)"
 
-    qty_font = FONT_BOLD if bold_number else FONT_NORMAL
+    # 숫자는 Arial을 사용하고, 단위는 기존 맑은 고딕을 유지합니다.
+    qty_font = FONT_NUMBER_BOLD if bold_number else FONT_NUMBER
     unit_font = FONT_NORMAL
 
     qty_bbox = text_bbox(draw, qty_text, qty_font)
@@ -320,17 +354,17 @@ def draw_count_right(draw, x, y, width, height, quantity, bold_number=False):
     unit_w = unit_bbox[2] - unit_bbox[0]
     total_w = qty_w + unit_w
 
-    start_x = x + width - total_w - 6
+    start_x = round(x + width - total_w - 6)
 
     qty_h = qty_bbox[3] - qty_bbox[1]
     unit_h = unit_bbox[3] - unit_bbox[1]
 
-    qty_y = y + (height - qty_h) / 2 - qty_bbox[1]
-    unit_y = y + (height - unit_h) / 2 - unit_bbox[1]
+    qty_y = round(y + (height - qty_h) / 2 - qty_bbox[1])
+    unit_y = round(y + (height - unit_h) / 2 - unit_bbox[1])
 
-    draw.text((start_x - qty_bbox[0], qty_y), qty_text, font=qty_font, fill=TEXT_COLOR)
+    draw.text((round(start_x - qty_bbox[0]), qty_y), qty_text, font=qty_font, fill=TEXT_COLOR)
     draw.text(
-        (start_x + qty_w - unit_bbox[0], unit_y),
+        (round(start_x + qty_w - unit_bbox[0]), unit_y),
         unit_text,
         font=unit_font,
         fill=TEXT_COLOR
@@ -601,7 +635,8 @@ class StatisticsApp:
             bd=1,
             command=self.run_balsong_statistics
         )
-        self.balsong_button.place(x=40, y=35, width=260, height=95)
+        # 버튼 2개는 기존 대비 약 2/3 너비로 축소했습니다.
+        self.balsong_button.place(x=130, y=25, width=175, height=85)
 
         self.unsent_button = Button(
             self.root,
@@ -613,7 +648,7 @@ class StatisticsApp:
             bd=1,
             command=self.run_unsent_statistics_placeholder
         )
-        self.unsent_button.place(x=340, y=35, width=260, height=95)
+        self.unsent_button.place(x=335, y=25, width=175, height=85)
 
         self.folder_button = Button(
             self.root,
@@ -625,8 +660,9 @@ class StatisticsApp:
             bd=1,
             command=self.choose_save_folder
         )
-        self.folder_button.place(x=40, y=155, width=130, height=34)
+        self.folder_button.place(x=40, y=140, width=120, height=34)
 
+        # 폴더 경로 칸은 줄이고, 오른쪽 엑셀 암호 입력칸은 넓혔습니다.
         self.folder_entry = Entry(
             self.root,
             textvariable=self.save_folder_var,
@@ -637,7 +673,7 @@ class StatisticsApp:
             state="readonly",
             readonlybackground=ENTRY_BG
         )
-        self.folder_entry.place(x=180, y=155, width=280, height=34)
+        self.folder_entry.place(x=170, y=140, width=250, height=34)
 
         self.password_label = Label(
             self.root,
@@ -646,7 +682,7 @@ class StatisticsApp:
             bg=WINDOW_BG,
             anchor="w"
         )
-        self.password_label.place(x=475, y=137, width=120, height=22)
+        self.password_label.place(x=435, y=117, width=165, height=22)
 
         self.password_entry = Entry(
             self.root,
@@ -657,7 +693,7 @@ class StatisticsApp:
             bd=1,
             show="*"
         )
-        self.password_entry.place(x=475, y=155, width=125, height=34)
+        self.password_entry.place(x=435, y=140, width=165, height=34)
 
     def choose_save_folder(self):
         folder = filedialog.askdirectory(title="저장할 폴더 선택")
