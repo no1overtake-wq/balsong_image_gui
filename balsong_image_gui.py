@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import sys
+import json
 import ctypes
 from collections import OrderedDict, defaultdict
 from datetime import datetime, date, timedelta
@@ -65,6 +66,40 @@ def resource_path(filename):
 
 def resource_font_path(filename):
     return resource_path(filename)
+
+
+def get_settings_path():
+    """저장 폴더/엑셀 암호를 다시 실행해도 유지하기 위한 설정 파일 경로."""
+    if os.name == "nt":
+        base_dir = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+        settings_dir = os.path.join(base_dir, "MagamReport")
+    else:
+        settings_dir = os.path.join(os.path.expanduser("~"), ".magam_report")
+
+    return os.path.join(settings_dir, "settings.json")
+
+
+def load_app_settings():
+    path = get_settings_path()
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_app_settings(data):
+    path = get_settings_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def load_font(size=14, bold=False, family="malgun"):
@@ -1087,16 +1122,28 @@ def set_windows_app_user_model_id():
 
 
 def apply_window_icon(root):
-    """창 왼쪽 위 아이콘과 작업표시줄 아이콘에 1.png 적용."""
-    icon_path = resource_path("1.png")
-    if not os.path.exists(icon_path):
-        return None
-    try:
-        icon_image = PhotoImage(file=icon_path)
-        root.iconphoto(True, icon_image)
-        return icon_image
-    except Exception:
-        return None
+    """창 왼쪽 위 아이콘과 작업표시줄 아이콘에 1.png/app_icon.ico 적용."""
+    icon_refs = []
+    ico_path = resource_path("app_icon.ico")
+    png_path = resource_path("1.png")
+
+    # Windows 창 아이콘은 .ico를 우선 적용한다.
+    if os.path.exists(ico_path):
+        try:
+            root.iconbitmap(ico_path)
+        except Exception:
+            pass
+
+    # 작업표시줄/창 아이콘 보강용으로 PNG도 적용한다.
+    if os.path.exists(png_path):
+        try:
+            icon_image = PhotoImage(file=png_path)
+            root.iconphoto(True, icon_image)
+            icon_refs.append(icon_image)
+        except Exception:
+            pass
+
+    return icon_refs
 
 
 # =========================
@@ -1126,11 +1173,23 @@ class ClosingReportApp:
         self.small_font = tkfont.Font(family="Malgun Gothic", size=9)
         self.status_font = tkfont.Font(family="Malgun Gothic", size=9, weight="bold")
 
-        self.save_folder = StringVar(value="")
-        self.password_value = StringVar(value="")
-        self.status_value = StringVar(value="저장 폴더를 선택한 뒤 통계 버튼을 눌러주세요.")
+        self.settings = load_app_settings()
+        self._save_after_id = None
+
+        self.save_folder = StringVar(value=clean_text(self.settings.get("save_folder", "")))
+        self.password_value = StringVar(value=str(self.settings.get("excel_password", "")))
+
+        if self.save_folder.get() and os.path.isdir(self.save_folder.get()):
+            initial_status = "이전에 선택한 저장 폴더와 엑셀 암호를 불러왔습니다."
+        else:
+            initial_status = "저장 폴더를 선택한 뒤 통계 버튼을 눌러주세요."
+
+        self.status_value = StringVar(value=initial_status)
 
         self.create_widgets()
+        self.save_folder.trace_add("write", self.schedule_save_settings)
+        self.password_value.trace_add("write", self.schedule_save_settings)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def center_window(self, width, height):
         self.root.update_idletasks()
@@ -1300,10 +1359,30 @@ class ClosingReportApp:
         )
         self.status_label.place(x=34, y=244, width=554, height=18)
 
+    def schedule_save_settings(self, *_args):
+        if self._save_after_id is not None:
+            try:
+                self.root.after_cancel(self._save_after_id)
+            except Exception:
+                pass
+        self._save_after_id = self.root.after(350, self.save_settings)
+
+    def save_settings(self):
+        self._save_after_id = None
+        save_app_settings({
+            "save_folder": clean_text(self.save_folder.get()),
+            "excel_password": self.password_value.get(),
+        })
+
+    def on_close(self):
+        self.save_settings()
+        self.root.destroy()
+
     def choose_save_folder(self):
         folder = filedialog.askdirectory(title="저장할 폴더 선택")
         if folder:
             self.save_folder.set(folder)
+            self.save_settings()
             self.status_value.set("저장 폴더가 선택되었습니다.")
 
     def require_save_folder(self):
@@ -1358,6 +1437,7 @@ class ClosingReportApp:
             self.password_entry.focus_set()
             return
 
+        self.save_settings()
         folder = self.require_save_folder()
         if not folder:
             return
