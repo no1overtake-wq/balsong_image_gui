@@ -52,7 +52,9 @@ UNSHIP_DELAY_RIGHT_W = 120
 # 선명도 보정: 실제 PNG는 2배 해상도로 그림
 IMAGE_SCALE = 2
 FONT_SIZE = 14
-UNSHIP_IMAGE_DOWNSCALE = 0.88  # 미발송통계 (2) 최종 출력 축소 비율
+OUTPUT_IMAGE_DOWNSCALE = 0.90  # 저장 PNG 최종 출력 축소 비율
+PNG_PALETTE_COLORS = 256
+PNG_COMPRESS_LEVEL = 9
 
 
 # =========================
@@ -303,6 +305,22 @@ def draw_number_center(draw, x, y, w, h, number, bold=False):
     draw_text_center(draw, x, y, w, h, text, FONT_NUM_BOLD if bold else FONT_NUM)
 
 
+def save_png_optimized(image, output_path, downscale=OUTPUT_IMAGE_DOWNSCALE):
+    """
+    1) 필요 시 비율 유지 축소
+    2) 256색 팔레트 변환 (dither 끔)
+    3) PNG 압축 강화
+    """
+    if downscale and downscale != 1.0:
+        new_w = max(1, int(round(image.width * downscale)))
+        new_h = max(1, int(round(image.height * downscale)))
+        image = image.resize((new_w, new_h), Image.LANCZOS)
+
+    # 표 이미지라 256색으로 줄여도 차이가 거의 없고 용량 절감 효과가 큼
+    image = image.convert("P", palette=Image.ADAPTIVE, colors=PNG_PALETTE_COLORS, dither=Image.Dither.NONE)
+    image.save(output_path, "PNG", optimize=True, compress_level=PNG_COMPRESS_LEVEL)
+
+
 def draw_number_right(draw, x, y, w, h, number, bold=False, padding=6):
     text = "" if number in (None, "", 0) else str(number)
     if not text:
@@ -550,7 +568,7 @@ def create_balsong_image(csv_path, output_path):
             draw_count_with_unit_right(draw, BALSONG_LEFT_W, y, BALSONG_RIGHT_W, BALSONG_ROW_H, row[2], bold_number=True)
 
     draw_grid(draw, [BALSONG_LEFT_W, BALSONG_RIGHT_W], row_count, BALSONG_ROW_H)
-    image.save(output_path, "PNG")
+    save_png_optimized(image, output_path)
 
 
 # =========================
@@ -1069,13 +1087,7 @@ def create_unshipped_size_image(records, product_order, color_order_map, output_
         draw_number_center(draw, x, y, UNSHIP_TOTAL_W, UNSHIP_ROW_H, row["total"], bold=bold)
 
     draw_grid(draw, widths, row_count, UNSHIP_ROW_H)
-
-    if UNSHIP_IMAGE_DOWNSCALE != 1.0:
-        new_w = max(1, int(image.width * UNSHIP_IMAGE_DOWNSCALE))
-        new_h = max(1, int(image.height * UNSHIP_IMAGE_DOWNSCALE))
-        image = image.resize((new_w, new_h), Image.LANCZOS)
-
-    image.save(output_path, "PNG")
+    save_png_optimized(image, output_path)
 
 
 def build_unshipped_delay_summary(records, product_delay_seen):
@@ -1142,7 +1154,7 @@ def create_unshipped_delay_image(records, product_delay_seen, output_path):
         draw_number_center(draw, widths[0], y, widths[1], UNSHIP_ROW_H, row["total"], bold=bold)
 
     draw_grid(draw, widths, row_count, UNSHIP_ROW_H)
-    image.save(output_path, "PNG")
+    save_png_optimized(image, output_path)
 
 
 def create_unshipped_images(excel_path, password, output_path_1, output_path_2):
