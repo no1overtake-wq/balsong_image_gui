@@ -44,14 +44,15 @@ BALSONG_TABLE_W = 244
 
 # 미발송 통계 표 기본 크기
 UNSHIP_ROW_H = 22
-UNSHIP_SIZE_W = 69
-UNSHIP_TOTAL_W = 59
+UNSHIP_SIZE_W = 63
+UNSHIP_TOTAL_W = 55
 UNSHIP_DELAY_LEFT_W = 108
 UNSHIP_DELAY_RIGHT_W = 120
 
 # 선명도 보정: 실제 PNG는 2배 해상도로 그림
 IMAGE_SCALE = 2
 FONT_SIZE = 14
+UNSHIP_IMAGE_DOWNSCALE = 0.88  # 미발송통계 (2) 최종 출력 축소 비율
 
 
 # =========================
@@ -259,6 +260,40 @@ def draw_text_left(draw, x, y, w, h, text, font, padding=6, fill=TEXT_COLOR):
     ty = scaled(y) + (scaled(h) - th) // 2 - bbox[1]
 
     draw.text((int(tx), int(ty)), text, font=font, fill=fill)
+
+
+def draw_text_left_baseline(draw, x, y, w, h, text, font, padding=6, fill=TEXT_COLOR, y_adjust=0):
+    """
+    색상명처럼 g, y, p, q, 괄호가 섞인 텍스트를 위한 세로 정렬 함수.
+
+    textbbox 기준 중앙정렬은 문자 모양마다 bbox 높이가 달라져서
+    Ash beige, Burgundy, Black (PU) 같은 줄이 위로 올라가 보일 수 있다.
+    이 함수는 실제 글자 모양이 아니라 폰트의 ascent/descent 기준으로
+    같은 baseline을 잡아 모든 색상 줄의 높이를 일정하게 맞춘다.
+    """
+    text = str(text)
+
+    try:
+        ascent, descent = font.getmetrics()
+    except Exception:
+        metric_bbox = text_bbox(draw, "Agjy()pq", font)
+        ascent = -metric_bbox[1]
+        descent = metric_bbox[3]
+
+    tx = scaled(x + padding)
+    baseline_y = (
+        scaled(y)
+        + (scaled(h) - (ascent + descent)) // 2
+        + ascent
+        + scaled(y_adjust)
+    )
+
+    try:
+        draw.text((int(tx), int(baseline_y)), text, font=font, fill=fill, anchor="ls")
+    except TypeError:
+        metric_bbox = text_bbox(draw, "Agjy()pq", font)
+        ty = scaled(y) + (scaled(h) - (metric_bbox[3] - metric_bbox[1])) // 2 - metric_bbox[1]
+        draw.text((int(tx), int(ty)), text, font=font, fill=fill)
 
 
 def draw_number_center(draw, x, y, w, h, number, bold=False):
@@ -846,7 +881,7 @@ def parse_option_color_size(option_text):
 def parse_delay_label(value):
     text = clean_text(value)
     if not text:
-        return 0, "00일지연"
+        return 0, "00일 지연"
 
     match = re.search(r"(\d+)\s*일", text)
     if match:
@@ -975,7 +1010,7 @@ def create_unshipped_size_image(records, product_order, color_order_map, output_
     # 긴 색상명 때문에 왼쪽 칸은 자동 보정
     tmp = Image.new("RGB", (10, 10), WHITE_FILL)
     tmp_draw = ImageDraw.Draw(tmp)
-    max_label_w = 170
+    max_label_w = 155
     for row in rows:
         font = FONT_BOLD if row["type"] == "product" else FONT_NORMAL
         bbox = text_bbox(tmp_draw, row["label"], font)
@@ -1022,7 +1057,7 @@ def create_unshipped_size_image(records, product_order, color_order_map, output_
         elif row_type == "footer":
             draw_text_center(draw, x, y, left_w, UNSHIP_ROW_H, row["label"], FONT_BOLD)
         else:
-            draw_text_left(draw, x, y, left_w, UNSHIP_ROW_H, row["label"], FONT_NORMAL, padding=38)
+            draw_text_left_baseline(draw, x, y, left_w, UNSHIP_ROW_H, row["label"], FONT_NORMAL, padding=34)
         x += left_w
 
         for size in sizes:
@@ -1034,6 +1069,12 @@ def create_unshipped_size_image(records, product_order, color_order_map, output_
         draw_number_center(draw, x, y, UNSHIP_TOTAL_W, UNSHIP_ROW_H, row["total"], bold=bold)
 
     draw_grid(draw, widths, row_count, UNSHIP_ROW_H)
+
+    if UNSHIP_IMAGE_DOWNSCALE != 1.0:
+        new_w = max(1, int(image.width * UNSHIP_IMAGE_DOWNSCALE))
+        new_h = max(1, int(image.height * UNSHIP_IMAGE_DOWNSCALE))
+        image = image.resize((new_w, new_h), Image.LANCZOS)
+
     image.save(output_path, "PNG")
 
 
