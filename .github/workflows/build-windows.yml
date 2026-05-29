@@ -31,9 +31,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Create Windows icon from 1.png
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "1.png")) {
+            throw "1.png 파일이 저장소 루트 폴더에 없습니다. balsong_image_gui.py와 같은 위치에 1.png를 업로드하세요."
+          }
+          python -c "from pathlib import Path; from PIL import Image; p=Path('1.png'); img=Image.open(p).convert('RGBA'); img.save('app_icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
       - name: Build exe with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name "마감보고" balsong_image_gui.py
+          pyinstaller --onefile --windowed --name "마감보고" --icon app_icon.ico --add-data "1.png;." balsong_image_gui.py
 
       - name: Upload exe artifact
         uses: actions/upload-artifact@v7
