@@ -33,10 +33,10 @@ jobs:
 
       - name: Build exe with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name "발송정리" balsong_image_gui.py
+          pyinstaller --onefile --windowed --name "마감보고" balsong_image_gui.py
 
       - name: Upload exe artifact
         uses: actions/upload-artifact@v7
         with:
-          name: balsong-summary-windows
-          path: dist/발송정리.exe
+          name: closing-report-windows
+          path: dist/마감보고.exe
