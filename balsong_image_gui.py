@@ -2,10 +2,12 @@ import csv
 import os
 import re
 import shutil
+import sys
+import ctypes
 from collections import OrderedDict, defaultdict
 from datetime import datetime, date, timedelta
 from io import BytesIO
-from tkinter import Tk, Button, Label, Entry, StringVar, filedialog, messagebox
+from tkinter import Tk, Button, Label, Entry, Frame, StringVar, PhotoImage, filedialog, messagebox
 import tkinter.font as tkfont
 
 from PIL import Image, ImageDraw, ImageFont
@@ -23,9 +25,15 @@ GRID_COLOR = "#111111"
 TEXT_COLOR = "#111111"
 
 # UI 색상
-WINDOW_BG = "#ffffff"
-BUTTON_BG = "#e5e5e5"
-BORDER_COLOR = "#d6d6d6"
+WINDOW_BG = "#f5f7fb"
+CARD_BG = "#ffffff"
+BUTTON_BG = "#f8fafc"
+BUTTON_ACTIVE_BG = "#eef4ff"
+ACCENT_BLUE = "#2563eb"
+ACCENT_ORANGE = "#f97316"
+BORDER_COLOR = "#d7deea"
+TEXT_DARK = "#172033"
+TEXT_MUTED = "#667085"
 
 # 발송 통계 표 기본 크기
 BALSONG_ROW_H = 22
@@ -49,8 +57,14 @@ FONT_SIZE = 14
 # 공통 유틸
 # =========================
 
+def resource_path(filename):
+    """PyInstaller onefile 실행과 일반 Python 실행을 모두 지원하는 리소스 경로."""
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, filename)
+
+
 def resource_font_path(filename):
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    return resource_path(filename)
 
 
 def load_font(size=14, bold=False, family="malgun"):
@@ -1062,26 +1076,59 @@ def create_unshipped_images(excel_path, password, output_path_1, output_path_2):
     create_unshipped_size_image(records, product_order, color_order_map, output_path_2)
 
 
+def set_windows_app_user_model_id():
+    """작업표시줄 그룹 아이콘이 프로그램 아이콘을 쓰도록 Windows AppUserModelID 설정."""
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("No1Overtake.MagamReport.1")
+    except Exception:
+        pass
+
+
+def apply_window_icon(root):
+    """창 왼쪽 위 아이콘과 작업표시줄 아이콘에 1.png 적용."""
+    icon_path = resource_path("1.png")
+    if not os.path.exists(icon_path):
+        return None
+    try:
+        icon_image = PhotoImage(file=icon_path)
+        root.iconphoto(True, icon_image)
+        return icon_image
+    except Exception:
+        return None
+
+
 # =========================
 # GUI
 # =========================
 
 class ClosingReportApp:
+    WINDOW_W = 620
+    WINDOW_H = 270
+
     def __init__(self):
+        set_windows_app_user_model_id()
+
         self.root = Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("500x185")
+        self.root.geometry(f"{self.WINDOW_W}x{self.WINDOW_H}")
         self.root.resizable(False, False)
         self.root.configure(bg=WINDOW_BG)
-        self.center_window(500, 185)
+        self.app_icon = apply_window_icon(self.root)
+        self.center_window(self.WINDOW_W, self.WINDOW_H)
 
+        self.title_font = tkfont.Font(family="Malgun Gothic", size=17, weight="bold")
+        self.subtitle_font = tkfont.Font(family="Malgun Gothic", size=9)
         self.ui_font = tkfont.Font(family="Malgun Gothic", size=10)
-        self.button_font = tkfont.Font(family="Malgun Gothic", size=18, weight="bold")
+        self.button_font = tkfont.Font(family="Malgun Gothic", size=17, weight="bold")
+        self.button_sub_font = tkfont.Font(family="Malgun Gothic", size=8)
         self.small_font = tkfont.Font(family="Malgun Gothic", size=9)
+        self.status_font = tkfont.Font(family="Malgun Gothic", size=9, weight="bold")
 
         self.save_folder = StringVar(value="")
         self.password_value = StringVar(value="")
-        self.status_value = StringVar(value="저장 폴더를 먼저 선택하세요.")
+        self.status_value = StringVar(value="저장 폴더를 선택한 뒤 통계 버튼을 눌러주세요.")
 
         self.create_widgets()
 
@@ -1093,82 +1140,165 @@ class ClosingReportApp:
         y = (screen_h - height) // 2
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    def create_widgets(self):
-        self.balsong_button = Button(
-            self.root,
-            text="발송 통계",
-            font=self.button_font,
-            bg=BUTTON_BG,
-            activebackground=BORDER_COLOR,
-            relief="solid",
-            bd=1,
-            command=self.run_balsong_summary,
-        )
-        self.balsong_button.place(x=32, y=18, width=150, height=72)
+    def make_card_button(self, x, y, title, subtitle, accent_color, command):
+        card = Frame(self.root, bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER_COLOR)
+        card.place(x=x, y=y, width=270, height=88)
 
-        self.unshipped_button = Button(
-            self.root,
-            text="미발송 통계",
+        accent = Frame(card, bg=accent_color)
+        accent.place(x=0, y=0, width=6, height=88)
+
+        title_label = Label(
+            card,
+            text=title,
             font=self.button_font,
-            bg=BUTTON_BG,
-            activebackground=BORDER_COLOR,
-            relief="solid",
-            bd=1,
-            command=self.run_unshipped_summary,
+            bg=CARD_BG,
+            fg=TEXT_DARK,
+            anchor="w",
         )
-        self.unshipped_button.place(x=200, y=18, width=150, height=72)
+        title_label.place(x=22, y=14, width=205, height=30)
+
+        subtitle_label = Label(
+            card,
+            text=subtitle,
+            font=self.button_sub_font,
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
+            anchor="w",
+        )
+        subtitle_label.place(x=23, y=48, width=205, height=22)
+
+        button = Button(
+            card,
+            text="실행",
+            font=self.ui_font,
+            fg="#ffffff",
+            bg=accent_color,
+            activeforeground="#ffffff",
+            activebackground=accent_color,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            command=command,
+        )
+        button.place(x=211, y=26, width=43, height=34)
+
+        def set_card_bg(color):
+            card.configure(bg=color)
+            title_label.configure(bg=color)
+            subtitle_label.configure(bg=color)
+
+        def on_enter(_event):
+            set_card_bg(BUTTON_ACTIVE_BG)
+
+        def on_leave(_event):
+            set_card_bg(CARD_BG)
+
+        for widget in (card, title_label, subtitle_label, button):
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            widget.bind("<Button-1>", lambda _event: command())
+
+        return card, button, title_label
+
+    def create_widgets(self):
+        title_label = Label(
+            self.root,
+            text="마감 보고",
+            font=self.title_font,
+            bg=WINDOW_BG,
+            fg=TEXT_DARK,
+            anchor="w",
+        )
+        title_label.place(x=32, y=18, width=240, height=28)
+
+        subtitle_label = Label(
+            self.root,
+            text="CSV 발송 통계와 엑셀 미발송 통계를 이미지로 자동 저장합니다.",
+            font=self.subtitle_font,
+            bg=WINDOW_BG,
+            fg=TEXT_MUTED,
+            anchor="w",
+        )
+        subtitle_label.place(x=33, y=48, width=520, height=20)
+
+        _, self.balsong_button, self.balsong_title = self.make_card_button(
+            32,
+            78,
+            "발송 통계",
+            "발송 CSV 선택 → 이미지 저장",
+            ACCENT_BLUE,
+            self.run_balsong_summary,
+        )
+
+        _, self.unshipped_button, self.unshipped_title = self.make_card_button(
+            318,
+            78,
+            "미발송 통계",
+            "암호 엑셀 선택 → 이미지 2장 저장",
+            ACCENT_ORANGE,
+            self.run_unshipped_summary,
+        )
+
+        control_card = Frame(self.root, bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER_COLOR)
+        control_card.place(x=32, y=182, width=556, height=58)
 
         self.folder_button = Button(
-            self.root,
+            control_card,
             text="저장 폴더 선택",
             font=self.ui_font,
             bg=BUTTON_BG,
-            activebackground=BORDER_COLOR,
-            relief="solid",
-            bd=1,
+            fg=TEXT_DARK,
+            activebackground=BUTTON_ACTIVE_BG,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
             command=self.choose_save_folder,
         )
-        self.folder_button.place(x=32, y=105, width=112, height=30)
+        self.folder_button.place(x=14, y=14, width=112, height=30)
 
         self.folder_entry = Entry(
-            self.root,
+            control_card,
             textvariable=self.save_folder,
             font=self.small_font,
-            relief="solid",
-            bd=1,
+            relief="flat",
+            bd=0,
             state="readonly",
-            readonlybackground="#ffffff",
+            readonlybackground="#f8fafc",
+            fg=TEXT_DARK,
         )
-        self.folder_entry.place(x=150, y=105, width=205, height=30)
+        self.folder_entry.place(x=136, y=14, width=250, height=30)
 
         self.password_label = Label(
-            self.root,
+            control_card,
             text="엑셀 암호",
             font=self.small_font,
-            bg=WINDOW_BG,
+            bg=CARD_BG,
+            fg=TEXT_MUTED,
             anchor="w",
         )
-        self.password_label.place(x=366, y=84, width=95, height=20)
+        self.password_label.place(x=400, y=4, width=120, height=18)
 
         self.password_entry = Entry(
-            self.root,
+            control_card,
             textvariable=self.password_value,
             font=self.ui_font,
-            relief="solid",
-            bd=1,
+            relief="flat",
+            bd=0,
             show="*",
+            bg="#f8fafc",
+            fg=TEXT_DARK,
         )
-        self.password_entry.place(x=365, y=105, width=103, height=30)
+        self.password_entry.place(x=400, y=22, width=140, height=24)
 
         self.status_label = Label(
             self.root,
             textvariable=self.status_value,
-            font=self.small_font,
+            font=self.status_font,
             bg=WINDOW_BG,
-            fg="#333333",
+            fg=TEXT_MUTED,
             anchor="w",
         )
-        self.status_label.place(x=32, y=145, width=436, height=22)
+        self.status_label.place(x=34, y=244, width=554, height=18)
 
     def choose_save_folder(self):
         folder = filedialog.askdirectory(title="저장할 폴더 선택")
@@ -1185,11 +1315,12 @@ class ClosingReportApp:
 
     def set_busy(self, button, text):
         button.config(text=text, state="disabled")
+        self.status_label.configure(fg=TEXT_DARK)
         self.root.update_idletasks()
 
     def set_ready(self):
-        self.balsong_button.config(text="발송 통계", state="normal")
-        self.unshipped_button.config(text="미발송 통계", state="normal")
+        self.balsong_button.config(text="실행", state="normal")
+        self.unshipped_button.config(text="실행", state="normal")
         self.root.update_idletasks()
 
     def run_balsong_summary(self):
@@ -1209,11 +1340,13 @@ class ClosingReportApp:
         output_path = unique_file_path(folder, output_name)
 
         try:
-            self.set_busy(self.balsong_button, "정리 중")
+            self.set_busy(self.balsong_button, "정리")
             self.status_value.set("발송 통계를 만드는 중입니다...")
             create_balsong_image(csv_path, output_path)
+            self.status_label.configure(fg=ACCENT_BLUE)
             self.status_value.set(f"저장 완료: {os.path.basename(output_path)}")
         except Exception as e:
+            self.status_label.configure(fg="#dc2626")
             self.status_value.set(f"오류: {e}")
         finally:
             self.set_ready()
@@ -1243,13 +1376,15 @@ class ClosingReportApp:
         output_path_1 = unique_file_path(folder, f"{date_code}-미발송통계 (1).png")
         output_path_2 = unique_file_path(folder, f"{date_code}-미발송통계 (2).png")
         try:
-            self.set_busy(self.unshipped_button, "정리 중")
+            self.set_busy(self.unshipped_button, "정리")
             self.status_value.set("미발송 통계 2장을 만드는 중입니다...")
             create_unshipped_images(excel_path, password, output_path_1, output_path_2)
+            self.status_label.configure(fg=ACCENT_ORANGE)
             self.status_value.set(
                 f"저장 완료: {os.path.basename(output_path_1)}, {os.path.basename(output_path_2)}"
             )
         except Exception as e:
+            self.status_label.configure(fg="#dc2626")
             self.status_value.set(f"오류: {e}")
         finally:
             self.set_ready()
