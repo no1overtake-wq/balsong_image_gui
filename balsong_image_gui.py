@@ -805,7 +805,7 @@ def parse_delay_label(value):
     else:
         days = parse_int(text, default=0)
 
-    return days, f"{days:02d}일지연"
+    return days, f"{days:02d}일 지연"
 
 
 def find_exact_or_keyword_column(columns, exact_name, keywords):
@@ -906,7 +906,8 @@ def build_unshipped_size_summary(records, product_order, color_order_map):
         grand_total += q
 
     rows = []
-    for product in product_order:
+    sorted_products = sorted(product_order, key=lambda p: (product_number(p), p))
+    for product in sorted_products:
         product_total = sum(product_summary[product].values())
         rows.append({"type": "product", "label": product, "sizes": dict(product_summary[product]), "total": product_total})
 
@@ -939,27 +940,14 @@ def create_unshipped_size_image(records, product_order, color_order_map, output_
     widths = [left_w] + [UNSHIP_SIZE_W for _ in sizes] + [UNSHIP_TOTAL_W]
     table_w = sum(widths)
 
-    header_rows = 2
+    header_rows = 1
     all_rows = rows + [footer]
     row_count = header_rows + len(all_rows)
     image = Image.new("RGB", (scaled(table_w), scaled(row_count * UNSHIP_ROW_H)), WHITE_FILL)
     draw = ImageDraw.Draw(image)
 
-    # 헤더 1행
+    # 헤더 1행만 유지 (사이즈 텍스트 줄 삭제)
     y = 0
-    x = 0
-    draw_rect(draw, x, y, left_w, UNSHIP_ROW_H, HEADER_FILL)
-    draw_text_center(draw, x, y, left_w, UNSHIP_ROW_H, "/", FONT_HEADER)
-    x += left_w
-
-    size_area_w = len(sizes) * UNSHIP_SIZE_W
-    draw_rect(draw, x, y, size_area_w, UNSHIP_ROW_H, HEADER_FILL)
-    draw_text_center(draw, x, y, size_area_w, UNSHIP_ROW_H, "사이즈", FONT_HEADER)
-    x += size_area_w
-    draw_rect(draw, x, y, UNSHIP_TOTAL_W, UNSHIP_ROW_H, HEADER_FILL)
-
-    # 헤더 2행
-    y = UNSHIP_ROW_H
     x = 0
     draw_rect(draw, x, y, left_w, UNSHIP_ROW_H, HEADER_FILL)
     draw_text_center(draw, x, y, left_w, UNSHIP_ROW_H, "품번/색상", FONT_HEADER)
@@ -1055,7 +1043,7 @@ def create_unshipped_delay_image(records, product_delay_seen, output_path):
         draw_rect(draw, widths[0], y, widths[1], UNSHIP_ROW_H, fill)
 
         if row_type == "delay":
-            draw_text_left(draw, 0, y, widths[0], UNSHIP_ROW_H, row["label"], FONT_BOLD, padding=8)
+            draw_text_center(draw, 0, y, widths[0], UNSHIP_ROW_H, row["label"], FONT_BOLD)
         elif row_type == "footer":
             draw_text_center(draw, 0, y, widths[0], UNSHIP_ROW_H, row["label"], FONT_BOLD)
         else:
@@ -1069,8 +1057,9 @@ def create_unshipped_delay_image(records, product_delay_seen, output_path):
 
 def create_unshipped_images(excel_path, password, output_path_1, output_path_2):
     records, product_order, color_order_map, product_delay_seen = extract_unshipped_records(excel_path, password=password)
-    create_unshipped_size_image(records, product_order, color_order_map, output_path_1)
-    create_unshipped_delay_image(records, product_delay_seen, output_path_2)
+    # 이미지 순서 변경: (1)=지연일수별 표, (2)=사이즈별 표
+    create_unshipped_delay_image(records, product_delay_seen, output_path_1)
+    create_unshipped_size_image(records, product_order, color_order_map, output_path_2)
 
 
 # =========================
