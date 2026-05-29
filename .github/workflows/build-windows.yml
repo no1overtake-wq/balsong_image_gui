@@ -14,9 +14,6 @@ jobs:
   build:
     runs-on: windows-latest
 
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -35,32 +32,31 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "1.png")) {
-            throw "1.png 파일이 저장소 루트 폴더에 없습니다. balsong_image_gui.py와 같은 위치에 1.png를 업로드하세요."
+            Write-Error "1.png 파일이 저장소 최상위 폴더에 없습니다. balsong_image_gui.py와 같은 위치에 1.png를 올려주세요."
+            exit 1
           }
-          python - <<'PY'
+
+          @'
           from pathlib import Path
           from PIL import Image
 
           src = Path("1.png")
-          icon = Path("app_icon.ico")
-
           img = Image.open(src).convert("RGBA")
-          if img.width != img.height:
-              size = max(img.width, img.height)
-              canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-              canvas.paste(img, ((size - img.width) // 2, (size - img.height) // 2), img)
-              img = canvas
 
-          img.save(icon, format="ICO", sizes=[(16,16), (24,24), (32,32), (48,48), (64,64), (128,128), (256,256)])
-          print(f"created {icon.resolve()}")
-          PY
+          # Windows 실행파일/작업표시줄/파일 탐색기에서 잘 보이도록 여러 크기를 한 ico에 넣음
+          img.save(
+              "app_icon.ico",
+              sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+          )
+          print("app_icon.ico created")
+          '@ | python -
 
       - name: Build exe with PyInstaller
         run: |
-          pyinstaller --clean --noconfirm --onefile --windowed --name "마감보고" --icon "app_icon.ico" --add-data "1.png;." --add-data "app_icon.ico;." balsong_image_gui.py
+          pyinstaller --onefile --windowed --name "마감보고" --icon "app_icon.ico" --add-data "1.png;." --add-data "app_icon.ico;." balsong_image_gui.py
 
       - name: Upload exe artifact
         uses: actions/upload-artifact@v7
         with:
-          name: closing-report-windows
+          name: magam-report-windows
           path: dist/마감보고.exe
